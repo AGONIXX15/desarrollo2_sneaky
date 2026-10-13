@@ -1,0 +1,9 @@
+.env
+*.pem
+.aws-sam/
+__pycache__/
+.venv/
+docs-privados/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

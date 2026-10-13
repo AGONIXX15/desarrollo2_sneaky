@@ -1,0 +1,36 @@
+[project]
+name = "notificaciones"
+version = "0.1.0"
+description = "Microservicio de notificaciones (Desarrollo II, Univalle)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.13",
+  "pydantic-settings>=2.4",
+  "httpx>=0.27",
+  "aio-pika>=9.4",
+  "pika>=1.3",
+  "jsonschema>=4.22",
+  "tzdata>=2026.5",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-postgresql>=6",
+  "respx>=0.21",
+  "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
