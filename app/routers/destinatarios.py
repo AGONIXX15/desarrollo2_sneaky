@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from math import ceil
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.deps import get_equipo, get_session, requiere_equipo_normal
 from core.db import ahora
 from core.models import Destinatario, Equipo, TipoNotificacion
-from core.schemas import DestinatarioIn, DestinatarioOut
+from core.schemas import DestinatarioIn, DestinatarioOut, DestinatarioPatch, PaginaDestinatarios
 
 router = APIRouter(prefix="/notificaciones/destinatarios", tags=["destinatarios"])
 
@@ -47,49 +49,68 @@ def crear(
     equipo: Equipo = Depends(requiere_equipo_normal),
     session: Session = Depends(get_session),
 ):
-    d = Destinatario(
-        equipo_id=equipo.id,
-        nombre=datos.nombre,
-        email=datos.email,
-        creado_at=ahora(),
-        tipos=_resolver_tipos(session, equipo, datos.tipos),
+    tipos = _resolver_tipos(session, equipo, datos.tipos)
+    existente = session.scalar(
+        select(Destinatario).where(
+            Destinatario.equipo_id == equipo.id,
+            func.lower(Destinatario.email) == datos.email.lower(),
+            Destinatario.activo.is_(True),
+        )
     )
+    if existente is not None:
+        raise HTTPException(409, {"mensaje": "El destinatario ya está registrado", "id": existente.id})
+    d = Destinatario(equipo_id=equipo.id, nombre=datos.nombre, email=datos.email, creado_at=ahora(), tipos=tipos)
     session.add(d)
     session.commit()
     return _salida(d, session)
 
 
-@router.get("", response_model=list[DestinatarioOut])
-def listar(equipo: Equipo = Depends(get_equipo), session: Session = Depends(get_session)):
-    q = select(Destinatario).order_by(Destinatario.id)
+@router.get("", response_model=PaginaDestinatarios)
+def listar(
+    activo: bool | None = None,
+    pagina: int = Query(1, ge=1),
+    tamano: int = Query(20, ge=1, le=100),
+    equipo: Equipo = Depends(get_equipo),
+    session: Session = Depends(get_session),
+):
+    filtros = []
     if not equipo.es_admin:
-        q = q.where(Destinatario.equipo_id == equipo.id)
-    return [_salida(d, session) for d in session.scalars(q)]
+        filtros.append(Destinatario.equipo_id == equipo.id)
+    if activo is not None:
+        filtros.append(Destinatario.activo.is_(activo))
+    total = session.scalar(select(func.count()).select_from(Destinatario).where(*filtros))
+    filas = session.scalars(
+        select(Destinatario)
+        .where(*filtros)
+        .order_by(Destinatario.id.desc())
+        .offset((pagina - 1) * tamano)
+        .limit(tamano)
+    ).all()
+    return PaginaDestinatarios(
+        items=[_salida(d, session) for d in filas],
+        total=total,
+        pagina=pagina,
+        tamano=tamano,
+        totalPaginas=ceil(total / tamano),
+    )
 
 
-@router.put("/{id_}", response_model=DestinatarioOut)
+@router.patch("/{id_}", response_model=DestinatarioOut)
 def actualizar(
     id_: int,
-    datos: DestinatarioIn,
+    datos: DestinatarioPatch,
     equipo: Equipo = Depends(requiere_equipo_normal),
     session: Session = Depends(get_session),
 ):
+    campos = datos.model_dump(exclude_unset=True)
+    if not campos or any(v is None for v in campos.values()):
+        raise HTTPException(422, "Envía al menos uno de nombre, tipos o activo, sin valores vacíos")
     d = _propio(session, equipo, id_)
-    if not d.activo:
-        raise HTTPException(404, "Destinatario no encontrado")
-    d.nombre = datos.nombre
-    d.email = datos.email
-    d.tipos = _resolver_tipos(session, equipo, datos.tipos)
+    if "tipos" in campos:
+        d.tipos = _resolver_tipos(session, equipo, campos["tipos"])
+    if "nombre" in campos:
+        d.nombre = campos["nombre"]
+    if "activo" in campos:
+        d.activo = campos["activo"]
     session.commit()
     return _salida(d, session)
-
-
-@router.delete("/{id_}", status_code=204)
-def borrar(
-    id_: int,
-    equipo: Equipo = Depends(requiere_equipo_normal),
-    session: Session = Depends(get_session),
-):
-    d = _propio(session, equipo, id_)
-    d.activo = False
-    session.commit()

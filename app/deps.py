@@ -56,6 +56,7 @@ def get_http_client() -> httpx.Client:
 
 def get_equipo(x_api_key: str | None = Header(default=None), session: Session = Depends(get_session)) -> Equipo:
     if not x_api_key:
+        log.warning("solicitud rechazada: falta el header X-API-Key")
         raise HTTPException(401, "Falta el header X-API-Key")
     key = session.scalar(select(ApiKey).where(ApiKey.hash == hash_api_key(x_api_key), ApiKey.activa.is_(True)))
     if key is None:

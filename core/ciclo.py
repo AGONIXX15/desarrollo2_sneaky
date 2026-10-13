@@ -132,7 +132,7 @@ def ejecutar_ciclo(
 
     webhooks = (
         select(Notificacion, Callback)
-        .join(Callback, Callback.equipo_id == Notificacion.equipo_destino_id)
+        .join(Callback, (Callback.equipo_id == Notificacion.equipo_destino_id) & Callback.activo.is_(True))
         .where(
             Notificacion.publicada_at.is_not(None),
             Notificacion.entregada_at.is_(None),

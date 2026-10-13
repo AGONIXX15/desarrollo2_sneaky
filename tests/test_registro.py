@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select, text
 
 from core.db import ahora
@@ -30,6 +31,39 @@ def test_payload_invalido_da_422(client, keys):
         headers=headers(keys["inventario"]),
     )
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "cambio",
+    [
+        {"productoId": "x" * 51},
+        {"productoId": "con espacio"},
+        {"productoId": "a_b"},
+        {"nombre": "n" * 101},
+        {"nombre": ""},
+        {"stockActual": 1000001},
+        {"stockActual": -1},
+        {"stockActual": 2.5},
+        {"stockMinimo": "diez"},
+    ],
+)
+def test_limites_de_longitud_y_rango_de_stock(client, keys, cambio):
+    r = client.post("/notificaciones", json={**STOCK, **cambio}, headers=headers(keys["inventario"]))
+    assert r.status_code == 422
+
+
+def test_limites_de_condicion_urgente_y_acumulacion(client, keys):
+    f = headers(keys["fabricacion"])
+    urgente = {"tipo": "CONDICION_URGENTE", "codigoCondicion": "HORNO-1", "descripcion": "ok"}
+    con_espacio = {**urgente, "codigoCondicion": "con espacio"}
+    assert client.post("/notificaciones", json=con_espacio, headers=f).status_code == 422
+    descripcion_larga = {**urgente, "descripcion": "d" * 101}
+    assert client.post("/notificaciones", json=descripcion_larga, headers=f).status_code == 422
+    assert client.post("/notificaciones", json=urgente, headers=f).status_code == 201
+    acum = {"tipo": "ACUMULACION_PEDIDOS", "cantidadPedidos": 3, "umbral": 2}
+    i = headers(keys["inventario"])
+    assert client.post("/notificaciones", json={**acum, "umbral": 1000001}, headers=i).status_code == 422
+    assert client.post("/notificaciones", json={**acum, "cantidadPedidos": 1.5}, headers=i).status_code == 422
 
 
 def test_codigo_condicion_largo_da_422(client, keys):
@@ -85,6 +119,28 @@ def test_alerta_vencida_crea_nueva(client, keys, session):
     assert r2.json()["id"] != r1.json()["id"]
     assert len(session.scalars(select(Alerta)).all()) == 2
     assert len(session.scalars(select(Alerta).where(Alerta.cerrada_at.is_(None))).all()) == 1
+
+
+def test_alerta_guarda_el_motivo_de_cierre(client, keys, session):
+    h = headers(keys["inventario"])
+    client.post("/notificaciones", json=STOCK, headers=h)
+    client.post("/notificaciones", json={**STOCK, "evento": "REPUESTO"}, headers=h)
+    client.post("/notificaciones", json=STOCK, headers=h)
+    vencida = ahora() - timedelta(minutes=1)
+    session.execute(text("UPDATE alertas SET expira_at = :t WHERE cerrada_at IS NULL"), {"t": vencida})
+    session.commit()
+    client.post("/notificaciones", json=STOCK, headers=h)
+    motivos = [a.motivo_resolucion for a in session.scalars(select(Alerta).order_by(Alerta.id))]
+    assert motivos == ["EMISOR", "EXPIRACION", None]
+
+
+def test_stock_de_producto_lo_emite_inventario_y_lo_recibe_fabricacion(client, keys):
+    cuerpo = {**STOCK, "tipo": "STOCK_BAJO_PRODUCTO"}
+    assert client.post("/notificaciones", json=cuerpo, headers=headers(keys["fabricacion"])).status_code == 403
+    r = client.post("/notificaciones", json=cuerpo, headers=headers(keys["inventario"]))
+    assert r.status_code == 201
+    r = client.get("/notificaciones/estado", headers=headers(keys["fabricacion"]))
+    assert [n["tipo"] for n in r.json()["items"]] == ["STOCK_BAJO_PRODUCTO"]
 
 
 def test_acumulacion_usa_clave_fija(client, keys):
