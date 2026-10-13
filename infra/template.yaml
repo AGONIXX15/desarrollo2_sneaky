@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Ciclo de reintentos del servicio de notificaciones
+
+# Antes de sam build hay que correr infra/armar_lambda.sh (copia core/ y lambda_retry/ a infra/build/lambda).
+# Después: sam build -t infra/template.yaml
+
+Parameters:
+  DatabaseUrlParam:
+    Type: String
+    Default: /notificaciones/DATABASE_URL
+  AmqpUrlParam:
+    Type: String
+    Default: /notificaciones/AMQP_URL
+  BrevoApiKeyParam:
+    Type: String
+    Default: /notificaciones/BREVO_API_KEY
+  RenderHealthUrlParam:
+    Type: String
+    Default: /notificaciones/RENDER_HEALTH_URL
+  MailFrom:
+    Type: String
+    Default: notificaciones@example.com
+
+Resources:
+  ColaMuertos:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+
+  FuncionCiclo:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: build/lambda/
+      Handler: lambda_retry.handler.handler
+      Runtime: python3.12
+      Architectures: [x86_64]
+      Timeout: 120
+      MemorySize: 256
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt ColaMuertos.Arn
+      Environment:
+        Variables:
+          # La Lambda recibe solo el nombre del parámetro y lee el valor en runtime (ver handler.cargar_ssm).
+          DATABASE_URL_PARAM: !Ref DatabaseUrlParam
+          AMQP_URL_PARAM: !Ref AmqpUrlParam
+          BREVO_API_KEY_PARAM: !Ref BrevoApiKeyParam
+          RENDER_HEALTH_URL_PARAM: !Ref RenderHealthUrlParam
+          MAIL_BACKEND: brevo
+          MAIL_FROM: !Ref MailFrom
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DatabaseUrlParam}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AmqpUrlParam}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${BrevoApiKeyParam}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RenderHealthUrlParam}
+      Events:
+        CadaCincoMinutos:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(5 minutes)
+
+  AlarmaErrores:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: El ciclo de notificaciones fallo
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref FuncionCiclo
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  FuncionCiclo:
+    Value: !Ref FuncionCiclo
+  ColaMuertos:
+    Value: !GetAtt ColaMuertos.Arn
