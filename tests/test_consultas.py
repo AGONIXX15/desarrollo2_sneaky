@@ -40,6 +40,7 @@ def test_detalle_y_leida(client, keys, datos):
     d = client.get(f"/notificaciones/estado/{id_}", headers=h).json()
     assert d["estado"] == "publicada"
     assert d["alerta"]["clave"] == "7"
+    assert d["alerta"]["motivo_resolucion"] is None
     assert d["creada_at"].endswith("Z")
     assert client.patch(f"/notificaciones/estado/{id_}/leida", headers=h).json()["leida_at"]
     # fabricacion no puede ver la de inventario

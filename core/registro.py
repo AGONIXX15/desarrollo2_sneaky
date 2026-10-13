@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.alertas import alerta_activa, cerrar_vencidas, clave_de, expiracion
+from core.alertas import MOTIVO_EMISOR, alerta_activa, cerrar_vencidas, clave_de, expiracion
 from core.ciclo import enviar_correo, publicar_notificacion
 from core.db import ahora
 from core.mailer import Mailer
@@ -80,6 +80,7 @@ def registrar(session: Session, equipo: Equipo, cuerpo: dict) -> Resultado:
             session.commit()
             return Resultado(200, None, alertas_cerradas=0)
         activa.cerrada_at = ahora()
+        activa.motivo_resolucion = MOTIVO_EMISOR
         session.commit()
         return Resultado(200, activa.notificacion_id, alertas_cerradas=1)
 

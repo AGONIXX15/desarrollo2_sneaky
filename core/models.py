@@ -145,11 +145,13 @@ class Alerta(Base):
     tipo: Mapped[str] = mapped_column(ForeignKey("tipos_notificacion.codigo"))
     clave: Mapped[str] = mapped_column(String(100))
     notificacion_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("notificaciones.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("notificaciones.id", ondelete="CASCADE"), unique=True
     )
     creada_at: Mapped[datetime]
     expira_at: Mapped[datetime]
     cerrada_at: Mapped[datetime | None]
+    # EMISOR (evento REPUESTO o RESUELTA) o EXPIRACION; NULL mientras la alerta sigue activa
+    motivo_resolucion: Mapped[str | None] = mapped_column(String(20))
 
     __table_args__ = (
         Index(

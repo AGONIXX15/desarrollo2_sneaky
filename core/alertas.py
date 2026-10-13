@@ -7,6 +7,8 @@ from core.db import ahora
 from core.models import Alerta, TipoNotificacion
 
 CLAVE_FIJA = "unica"
+MOTIVO_EMISOR = "EMISOR"
+MOTIVO_EXPIRACION = "EXPIRACION"
 
 
 def clave_de(tipo: TipoNotificacion, datos: dict) -> str:
@@ -21,7 +23,11 @@ def expiracion(tipo: TipoNotificacion):
 
 def cerrar_vencidas(session: Session, tipo: str | None = None, clave: str | None = None) -> int:
     ahora_ = ahora()
-    q = update(Alerta).where(Alerta.cerrada_at.is_(None), Alerta.expira_at <= ahora_).values(cerrada_at=ahora_)
+    q = (
+        update(Alerta)
+        .where(Alerta.cerrada_at.is_(None), Alerta.expira_at <= ahora_)
+        .values(cerrada_at=ahora_, motivo_resolucion=MOTIVO_EXPIRACION)
+    )
     if tipo is not None:
         q = q.where(Alerta.tipo == tipo, Alerta.clave == clave)
     return session.execute(q).rowcount
