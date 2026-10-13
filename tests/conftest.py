@@ -1,4 +1,5 @@
 import os
+import shutil
 
 os.environ["WORKER_ENABLED"] = "false"
 os.environ["MAIL_BACKEND"] = "smtp"
@@ -27,7 +28,9 @@ from scripts.crear_api_key import crear_key
 
 RAIZ = Path(__file__).resolve().parent.parent
 
-postgres_proc = factories.postgresql_proc(executable="/usr/bin/pg_ctl", port=None)
+# En Ubuntu pg_ctl no queda en el PATH: exportar PG_CTL=/usr/lib/postgresql/16/bin/pg_ctl
+PG_CTL = os.environ.get("PG_CTL") or shutil.which("pg_ctl") or "/usr/bin/pg_ctl"
+postgres_proc = factories.postgresql_proc(executable=PG_CTL, port=None)
 
 
 class FakePublisher:
