@@ -33,6 +33,4 @@ def crear(
     respuesta.status_code = res.status
     if res.status == 201:
         tareas.add_task(procesar_despues_de_registrar, factory, publisher, mailer, res.notificacion_id)
-    return RegistroOut(
-        id=res.notificacion_id, duplicada=res.duplicada, alertas_cerradas=res.alertas_cerradas
-    )
+    return RegistroOut(id=res.notificacion_id, duplicada=res.duplicada, alertas_cerradas=res.alertas_cerradas)

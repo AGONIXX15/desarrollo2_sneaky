@@ -36,9 +36,7 @@ class AmqpPublisher:
                 self.exchange,
                 equipo_destino,
                 json.dumps(mensaje).encode(),
-                properties=pika.BasicProperties(
-                    content_type="application/json", delivery_mode=2
-                ),
+                properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
                 mandatory=True,
             )
         finally:

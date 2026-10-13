@@ -111,3 +111,42 @@ def test_correos_a_destinatarios_suscritos(client, keys, mailer, session):
     assert mailer.enviados == []
     n = session.scalars(select(Notificacion)).one()
     assert [(e.email, e.intentos) for e in n.envios] == [("ana@x.com", 1)]
+
+
+def test_clave_demasiado_larga_da_422(client, keys, session):
+    session.execute(
+        text("UPDATE tipos_notificacion SET campo_clave = 'descripcion' WHERE codigo = 'CONDICION_URGENTE'")
+    )
+    session.commit()
+    r = client.post(
+        "/notificaciones",
+        json={"tipo": "CONDICION_URGENTE", "codigoCondicion": "A", "descripcion": "x" * 101},
+        headers=headers(keys["fabricacion"]),
+    )
+    assert r.status_code == 422
+    session.execute(
+        text("UPDATE tipos_notificacion SET campo_clave = 'codigoCondicion' WHERE codigo = 'CONDICION_URGENTE'")
+    )
+    session.commit()
+
+
+def test_clave_ausente_da_422(client, keys, session):
+    session.execute(text("UPDATE tipos_notificacion SET campo_clave = 'otro' WHERE codigo = 'ACUMULACION_PEDIDOS'"))
+    session.commit()
+    r = client.post(
+        "/notificaciones",
+        json={"tipo": "ACUMULACION_PEDIDOS", "cantidadPedidos": 3, "umbral": 2},
+        headers=headers(keys["inventario"]),
+    )
+    session.execute(text("UPDATE tipos_notificacion SET campo_clave = NULL WHERE codigo = 'ACUMULACION_PEDIDOS'"))
+    session.commit()
+    assert r.status_code == 422
+
+
+def test_body_grande_da_413(client, keys):
+    r = client.post(
+        "/notificaciones",
+        content=b'{"tipo": "X", "relleno": "' + b"a" * 70_000 + b'"}',
+        headers={**headers(keys["inventario"]), "Content-Type": "application/json"},
+    )
+    assert r.status_code == 413

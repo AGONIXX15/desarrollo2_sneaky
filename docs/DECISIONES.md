@@ -8,6 +8,8 @@ Decisión: una Lambda disparada por EventBridge cada 5 minutos que llama a `ejec
 
 Descartamos el cron de GitHub Actions: el mínimo real es cada 5 minutos con retrasos grandes, se puede desactivar solo si el repo no tiene actividad y no tiene alarmas ni DLQ.
 
+El ciclo tiene un tiempo límite: la Lambda le pasa `limite_segundos` (lo que queda de ejecución menos 40 s de margen) y deja de tomar filas cuando se acaba. Toma de a una fila con `SKIP LOCKED` y hace commit por fila, así no sostiene locks mientras espera a un webhook o a Brevo, y lo que ya se hizo queda guardado aunque se corte. El lote es de 20 por paso y el timeout de la Lambda es de 300 s. Si falla, no se reintenta solo (`MaximumRetryAttempts: 0`): el siguiente ciclo ya lo cubre. La alarma de Errors avisa por SNS al correo del parámetro `AlertaEmail`.
+
 Consecuencias: hay que empaquetar `core/` junto con la Lambda (`infra/armar_lambda.sh`) y los secretos se leen de SSM en runtime. SAM no deja resolver SecureString dentro de `Environment`, así que la Lambda recibe el nombre del parámetro y lo lee con boto3 al arrancar. Si el ciclo revienta, la excepción sube, cae a la DLQ y salta la alarma de Errors.
 
 ## CloudAMQP y SQS como plan B
@@ -56,6 +58,12 @@ Decisión: cada equipo registra una URL https con `PUT /notificaciones/callbacks
 
 La URL se rechaza si no es https o si el host resuelve a una IP privada, loopback o link-local.
 
+Cada POST lleva además `X-Timestamp` (segundos epoch) y la firma se calcula sobre `"<timestamp>.<body>"`. Así el receptor puede rechazar mensajes con más de unos minutos de antigüedad y un POST capturado no sirve para repetirlo después. Para verificar: `hmac_sha256(secreto, timestamp + "." + body_crudo)` en hex, comparado con `X-Signature` en tiempo constante.
+
+La URL del callback se vuelve a validar (resolución y chequeo de IP) justo antes de cada POST, no solo al registrarla, por si el DNS pasa a apuntar a una IP interna. Solo se aceptan los puertos 443 y 8443. Si la validación falla cuenta como un intento de entrega fallido.
+
+Al publicar se programa `proximo_intento_entrega_at` a 5 minutos. Si el worker pierde el mensaje antes de intentar el webhook, el ciclo lo toma pasado ese plazo. Si el worker entrega antes, no pasa nada.
+
 Consecuencias: el mensaje de la cola siempre se confirma (ack) y el reintento lo hace el ciclo, hasta 3 intentos. Puede llegar duplicada, así que el equipo destino debe usar `X-Notification-Id` para ignorar repetidas. Si un equipo no tiene callback no es error, consulta por GET.
 
 ## Alertas anti-duplicados
@@ -82,3 +90,11 @@ Descartamos devolver 409 cuando ya hay un ciclo corriendo, porque obligaba a lle
 6. El estado pasa a `publicada` y el worker hace el webhook si hay callback.
 
 Para los correos es igual con Mailpit apagado. El reintento solo ocurre cuando pasan los 5 minutos de `proximo_intento_at`.
+
+## Migraciones al arrancar el contenedor
+
+El `Dockerfile` corre `alembic upgrade head` antes de levantar uvicorn. Funciona porque hay una sola instancia de la API. Si algún día hay varias, las migraciones tendrían que ir en un paso aparte del despliegue. El contenedor corre con un usuario sin privilegios y la imagen de uv está fijada a la versión que usamos en local.
+
+## Carrera entre la API y el ciclo
+
+El ciclo ignora las notificaciones creadas hace menos de un minuto para no pisar la tarea de fondo que acaba de crearlas. La tarea de fondo toma la fila con `SKIP LOCKED` y revisa `publicada_at` antes de publicar.

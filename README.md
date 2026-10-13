@@ -41,6 +41,16 @@ Levantan un Postgres temporal con `pg_ctl` (hace falta tenerlo en `/usr/bin`), a
 
 `core/ciclo.py` tiene `ejecutar_ciclo`, que republica lo pendiente, reenvía correos fallidos, reintenta webhooks y cierra alertas vencidas. Lo llama la Lambda cada 5 minutos y también `POST /notificaciones/ciclo` con la key de notificaciones. Para probar el re-send ver `docs/DECISIONES.md`.
 
+## Verificar la firma del webhook
+
+Cada POST trae `X-Notification-Id`, `X-Timestamp` y `X-Signature`. La firma es el HMAC-SHA256 en hex de `timestamp + "." + body` con el secreto que devolvió `PUT /notificaciones/callbacks`:
+
+    import hmac, hashlib
+    esperado = hmac.new(secreto.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    hmac.compare_digest(esperado, firma_recibida)
+
+Conviene rechazar si el timestamp tiene más de unos minutos de antigüedad. El body se firma tal cual llega (bytes crudos), no el JSON ya parseado.
+
 ## Estructura
 
     app/            API (routers, auth por API key, worker de webhooks)

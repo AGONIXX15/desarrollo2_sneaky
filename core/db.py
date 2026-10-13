@@ -15,9 +15,9 @@ def ahora() -> datetime:
 def normalizar_url(url: str) -> str:
     # Neon y Render entregan postgresql:// a secas; SQLAlchemy necesita elegir el driver
     if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
+        url = "postgresql://" + url[len("postgres://") :]
     if url.startswith("postgresql://"):
-        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
     return url
 
 

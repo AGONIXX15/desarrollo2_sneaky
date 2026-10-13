@@ -5,6 +5,7 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # la URL de Neon debe terminar en ?sslmode=require
       - key: DATABASE_URL
         sync: false
       - key: AMQP_URL

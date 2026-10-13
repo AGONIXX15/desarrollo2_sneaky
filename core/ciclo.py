@@ -1,8 +1,9 @@
 import logging
+import time
 from datetime import timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from core.alertas import cerrar_vencidas
@@ -14,15 +15,14 @@ from core.publisher import Publisher
 from core.webhooks import entregar_webhook
 
 log = logging.getLogger(__name__)
-LOTE = 100
+LOTE = 20
+GRACIA_PRIMER_INTENTO = timedelta(minutes=1)
 
 
 def publicar_notificacion(session: Session, publisher: Publisher, notif: Notificacion) -> bool:
     """Intenta publicar y deja el resultado en la fila. No hace commit."""
     try:
-        publisher.publicar(
-            notif.destino.nombre, {"notificacionId": str(notif.id), "tipo": notif.tipo}
-        )
+        publisher.publicar(notif.destino.nombre, {"notificacionId": str(notif.id), "tipo": notif.tipo})
     except Exception as e:
         notif.intentos_publicacion += 1
         notif.ultimo_error_publicacion = str(e)[:500]
@@ -30,13 +30,15 @@ def publicar_notificacion(session: Session, publisher: Publisher, notif: Notific
         return False
     notif.publicada_at = ahora()
     notif.ultimo_error_publicacion = None
+    # si el worker pierde el mensaje, el ciclo reintenta la entrega pasado este plazo
+    notif.proximo_intento_entrega_at = ahora() + timedelta(minutes=get_settings().reintento_minutos)
     return True
 
 
 def enviar_correo(session: Session, mailer: Mailer, envio: EnvioCorreo) -> bool:
     """Intenta enviar y deja el resultado en la fila. No hace commit."""
-    asunto, texto = componer_correo(envio.notificacion, envio.destinatario.nombre)
     try:
+        asunto, texto = componer_correo(envio.notificacion, envio.destinatario.nombre)
         mailer.enviar(envio.email, envio.destinatario.nombre, asunto, texto)
     except Exception as e:
         envio.intentos += 1
@@ -49,10 +51,36 @@ def enviar_correo(session: Session, mailer: Mailer, envio: EnvioCorreo) -> bool:
     return True
 
 
+def _por_fila(session: Session, consulta: Select, modelo, vencido, procesar) -> None:
+    """Toma de a una fila con SKIP LOCKED y hace commit por fila, así no se sostienen locks durante el I/O."""
+    vistas: set = set()
+    for _ in range(LOTE):
+        if vencido():
+            break
+        fila = session.execute(
+            consulta.where(modelo.id.not_in(vistas)).limit(1).with_for_update(skip_locked=True, of=modelo)
+        ).first()
+        if fila is None:
+            break
+        vistas.add(fila[0].id)
+        procesar(*fila)
+        session.commit()
+
+
 def ejecutar_ciclo(
-    session: Session, publisher: Publisher, mailer: Mailer, http_client: httpx.Client
+    session: Session,
+    publisher: Publisher,
+    mailer: Mailer,
+    http_client: httpx.Client,
+    limite_segundos: float | None = None,
 ) -> dict:
+    """Un recorrido de reintentos. Si pasa limite_segundos deja de tomar filas nuevas."""
     max_intentos = get_settings().max_intentos
+    fin = None if limite_segundos is None else time.monotonic() + limite_segundos
+
+    def vencido() -> bool:
+        return fin is not None and time.monotonic() >= fin
+
     resumen = {
         "publicadas": 0,
         "publicacion_fallidas": 0,
@@ -61,21 +89,31 @@ def ejecutar_ciclo(
         "webhooks_entregados": 0,
         "webhooks_fallidos": 0,
         "alertas_cerradas": 0,
+        "cortado_por_tiempo": False,
     }
 
-    pendientes = session.scalars(
-        select(Notificacion)
-        .where(Notificacion.publicada_at.is_(None), Notificacion.intentos_publicacion < max_intentos)
-        .order_by(Notificacion.creada_at)
-        .limit(LOTE)
-        .with_for_update(skip_locked=True, of=Notificacion)
-    ).all()
-    for notif in pendientes:
-        ok = publicar_notificacion(session, publisher, notif)
-        resumen["publicadas" if ok else "publicacion_fallidas"] += 1
-    session.commit()
+    def contar(ok: bool, bien: str, mal: str) -> None:
+        resumen[bien if ok else mal] += 1
 
-    envios = session.scalars(
+    # las recién creadas las publica la tarea de fondo de la API, no las pisamos
+    publicaciones = (
+        select(Notificacion)
+        .where(
+            Notificacion.publicada_at.is_(None),
+            Notificacion.intentos_publicacion < max_intentos,
+            Notificacion.creada_at <= ahora() - GRACIA_PRIMER_INTENTO,
+        )
+        .order_by(Notificacion.creada_at)
+    )
+    _por_fila(
+        session,
+        publicaciones,
+        Notificacion,
+        vencido,
+        lambda n: contar(publicar_notificacion(session, publisher, n), "publicadas", "publicacion_fallidas"),
+    )
+
+    envios = (
         select(EnvioCorreo)
         .where(
             EnvioCorreo.enviado_at.is_(None),
@@ -83,15 +121,16 @@ def ejecutar_ciclo(
             EnvioCorreo.proximo_intento_at <= ahora(),
         )
         .order_by(EnvioCorreo.id)
-        .limit(LOTE)
-        .with_for_update(skip_locked=True, of=EnvioCorreo)
-    ).all()
-    for envio in envios:
-        ok = enviar_correo(session, mailer, envio)
-        resumen["correos_enviados" if ok else "correos_fallidos"] += 1
-    session.commit()
+    )
+    _por_fila(
+        session,
+        envios,
+        EnvioCorreo,
+        vencido,
+        lambda e: contar(enviar_correo(session, mailer, e), "correos_enviados", "correos_fallidos"),
+    )
 
-    filas = session.execute(
+    webhooks = (
         select(Notificacion, Callback)
         .join(Callback, Callback.equipo_id == Notificacion.equipo_destino_id)
         .where(
@@ -101,14 +140,16 @@ def ejecutar_ciclo(
             Notificacion.proximo_intento_entrega_at <= ahora(),
         )
         .order_by(Notificacion.creada_at)
-        .limit(LOTE)
-        .with_for_update(skip_locked=True, of=Notificacion)
-    ).all()
-    for notif, callback in filas:
-        ok = entregar_webhook(session, notif, callback, http_client)
-        resumen["webhooks_entregados" if ok else "webhooks_fallidos"] += 1
-    session.commit()
+    )
+    _por_fila(
+        session,
+        webhooks,
+        Notificacion,
+        vencido,
+        lambda n, cb: contar(entregar_webhook(session, n, cb, http_client), "webhooks_entregados", "webhooks_fallidos"),
+    )
 
+    resumen["cortado_por_tiempo"] = vencido()
     resumen["alertas_cerradas"] = cerrar_vencidas(session)
     session.commit()
     return resumen

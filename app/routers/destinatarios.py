@@ -75,10 +75,11 @@ def actualizar(
     session: Session = Depends(get_session),
 ):
     d = _propio(session, equipo, id_)
+    if not d.activo:
+        raise HTTPException(404, "Destinatario no encontrado")
     d.nombre = datos.nombre
     d.email = datos.email
     d.tipos = _resolver_tipos(session, equipo, datos.tipos)
-    d.activo = True
     session.commit()
     return _salida(d, session)
 

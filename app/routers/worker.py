@@ -11,6 +11,7 @@ from core.models import Equipo
 from core.webhooks import procesar_mensaje
 
 log = logging.getLogger(__name__)
+REFRESCO_SEGUNDOS = 60
 
 
 async def _atender(mensaje: aio_pika.abc.AbstractIncomingMessage, session_factory, http_client):
@@ -40,14 +41,18 @@ async def correr_worker(settings: Settings, session_factory) -> None:
                 exchange = await canal.declare_exchange(
                     settings.amqp_exchange, aio_pika.ExchangeType.DIRECT, durable=True
                 )
-                for nombre in await asyncio.to_thread(_nombres_equipos, session_factory):
-                    cola = await canal.declare_queue(f"notif.{nombre}", durable=True)
-                    await cola.bind(exchange, routing_key=nombre)
-                    await cola.consume(
-                        lambda m: _atender(m, session_factory, http_client)
-                    )
-                log.info("worker de webhooks escuchando")
-                await asyncio.Future()
+                consumiendo: set[str] = set()
+                while True:
+                    # cada minuto mira si hay equipos nuevos para escuchar su cola
+                    for nombre in await asyncio.to_thread(_nombres_equipos, session_factory):
+                        if nombre in consumiendo:
+                            continue
+                        cola = await canal.declare_queue(f"notif.{nombre}", durable=True)
+                        await cola.bind(exchange, routing_key=nombre)
+                        await cola.consume(lambda m: _atender(m, session_factory, http_client))
+                        consumiendo.add(nombre)
+                        log.info("worker escuchando notif.%s", nombre)
+                    await asyncio.sleep(REFRESCO_SEGUNDOS)
         except asyncio.CancelledError:
             http_client.close()
             raise

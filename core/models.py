@@ -111,9 +111,7 @@ class Notificacion(Base):
 
     emisor: Mapped[Equipo] = relationship(foreign_keys=[equipo_emisor_id])
     destino: Mapped[Equipo] = relationship(foreign_keys=[equipo_destino_id])
-    envios: Mapped[list["EnvioCorreo"]] = relationship(
-        back_populates="notificacion", order_by="EnvioCorreo.id"
-    )
+    envios: Mapped[list["EnvioCorreo"]] = relationship(back_populates="notificacion", order_by="EnvioCorreo.id")
 
     __table_args__ = (
         Index("ix_notificaciones_creada_at", "creada_at"),

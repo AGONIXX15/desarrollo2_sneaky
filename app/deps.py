@@ -12,7 +12,7 @@ from core.db import get_session_factory as _factory
 from core.mailer import Mailer, crear_mailer
 from core.models import ApiKey, Equipo
 from core.publisher import AmqpPublisher, Publisher
-from core.seguridad import hash_api_key, prefijo_visible
+from core.seguridad import hash_api_key
 
 log = logging.getLogger(__name__)
 
@@ -54,16 +54,12 @@ def get_http_client() -> httpx.Client:
     return _http()
 
 
-def get_equipo(
-    x_api_key: str | None = Header(default=None), session: Session = Depends(get_session)
-) -> Equipo:
+def get_equipo(x_api_key: str | None = Header(default=None), session: Session = Depends(get_session)) -> Equipo:
     if not x_api_key:
         raise HTTPException(401, "Falta el header X-API-Key")
-    key = session.scalar(
-        select(ApiKey).where(ApiKey.hash == hash_api_key(x_api_key), ApiKey.activa.is_(True))
-    )
+    key = session.scalar(select(ApiKey).where(ApiKey.hash == hash_api_key(x_api_key), ApiKey.activa.is_(True)))
     if key is None:
-        log.warning("api key inválida, prefijo=%s", prefijo_visible(x_api_key))
+        log.warning("api key rechazada: no coincide con ninguna key activa")
         raise HTTPException(401, "API key inválida")
     return key.equipo
 

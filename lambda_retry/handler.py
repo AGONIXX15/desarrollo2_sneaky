@@ -28,16 +28,23 @@ def cargar_ssm() -> None:
         for var, param in SECRETOS_SSM.items()
         if os.environ.get(param) and not os.environ.get(var)
     }
-    if not pendientes:
-        return
-    import boto3
+    if pendientes:
+        import boto3
 
-    resp = boto3.client("ssm").get_parameters(Names=list(pendientes.values()), WithDecryption=True)
-    por_nombre = {p["Name"]: p["Value"] for p in resp["Parameters"]}
-    for var, nombre in pendientes.items():
-        if nombre in por_nombre:
+        resp = boto3.client("ssm").get_parameters(Names=list(pendientes.values()), WithDecryption=True)
+        if resp.get("InvalidParameters"):
+            raise RuntimeError(f"Parámetros SSM que no existen: {resp['InvalidParameters']}")
+        por_nombre = {p["Name"]: p["Value"] for p in resp["Parameters"]}
+        for var, nombre in pendientes.items():
             os.environ[var] = por_nombre[nombre]
-    get_settings.cache_clear()
+        get_settings.cache_clear()
+
+    obligatorias = ["DATABASE_URL", "AMQP_URL"]
+    if os.environ.get("MAIL_BACKEND", "smtp") == "brevo":
+        obligatorias.append("BREVO_API_KEY")
+    faltan = [v for v in obligatorias if not os.environ.get(v)]
+    if faltan:
+        raise RuntimeError(f"Faltan variables de configuración: {faltan}")
 
 
 def construir_dependencias():
@@ -53,12 +60,21 @@ def construir_dependencias():
     )
 
 
+MARGEN_SEGUNDOS = 40  # un webhook puede tardar 10 s y luego viene el ping a Render
+
+
+def _limite(context) -> float | None:
+    if context is None:
+        return None
+    return max(5.0, context.get_remaining_time_in_millis() / 1000 - MARGEN_SEGUNDOS)
+
+
 def handler(event, context):
     from core.ciclo import ejecutar_ciclo
 
     session, publisher, mailer, http_client = construir_dependencias()
     try:
-        resumen = ejecutar_ciclo(session, publisher, mailer, http_client)
+        resumen = ejecutar_ciclo(session, publisher, mailer, http_client, limite_segundos=_limite(context))
         url = get_settings().render_health_url
         if url:
             try:

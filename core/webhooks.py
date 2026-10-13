@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import timedelta
 
 import httpx
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from core.config import get_settings
 from core.db import ahora
 from core.models import Callback, Notificacion
-from core.seguridad import firmar
+from core.seguridad import firmar, validar_url_callback
 
 log = logging.getLogger(__name__)
 
@@ -32,21 +33,21 @@ def callback_de(session: Session, equipo_id: int) -> Callback | None:
     return session.scalar(select(Callback).where(Callback.equipo_id == equipo_id))
 
 
-def entregar_webhook(
-    session: Session, notif: Notificacion, callback: Callback, http_client: httpx.Client
-) -> bool:
+def entregar_webhook(session: Session, notif: Notificacion, callback: Callback, http_client: httpx.Client) -> bool:
     """Hace el POST firmado y deja el resultado en la notificación. No hace commit."""
     cfg = get_settings()
-    cuerpo = cuerpo_webhook(notif)
-    headers = {
-        "Content-Type": "application/json",
-        "X-Notification-Id": str(notif.id),
-        "X-Signature": firmar(cuerpo, callback.secreto),
-    }
     try:
-        resp = http_client.post(
-            callback.url, content=cuerpo, headers=headers, timeout=cfg.webhook_timeout
-        )
+        # se vuelve a validar justo antes de postear por si el DNS cambió desde que se registró
+        validar_url_callback(callback.url)
+        cuerpo = cuerpo_webhook(notif)
+        timestamp = str(int(time.time()))
+        headers = {
+            "Content-Type": "application/json",
+            "X-Notification-Id": str(notif.id),
+            "X-Timestamp": timestamp,
+            "X-Signature": firmar(cuerpo, callback.secreto, timestamp),
+        }
+        resp = http_client.post(callback.url, content=cuerpo, headers=headers, timeout=cfg.webhook_timeout)
         if not resp.is_success:
             raise RuntimeError(f"respuesta {resp.status_code}")
     except Exception as e:

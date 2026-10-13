@@ -69,8 +69,14 @@ def test_destinatarios_solo_tipos_propios(client, keys):
 
 @pytest.mark.parametrize(
     "url",
-    ["http://8.8.8.8/hook", "https://localhost/hook", "https://127.0.0.1/hook",
-     "https://10.0.0.5/hook", "https://192.168.1.2/hook", "https://169.254.169.254/x"],
+    [
+        "http://8.8.8.8/hook",
+        "https://localhost/hook",
+        "https://127.0.0.1/hook",
+        "https://10.0.0.5/hook",
+        "https://192.168.1.2/hook",
+        "https://169.254.169.254/x",
+    ],
 )
 def test_callback_rechaza_urls_no_publicas(client, keys, url):
     r = client.put("/notificaciones/callbacks", json={"url": url}, headers=headers(keys["inventario"]))
@@ -83,3 +89,42 @@ def test_callback_valido_devuelve_secreto(client, keys):
     )
     assert r.status_code == 200
     assert len(r.json()["secreto"]) == 64
+
+
+def test_destinatario_con_email_invalido_da_422(client, keys):
+    r = client.post(
+        "/notificaciones/destinatarios",
+        json={"nombre": "Ana", "email": "no-es-email", "tipos": []},
+        headers=headers(keys["inventario"]),
+    )
+    assert r.status_code == 422
+
+
+def test_put_no_reactiva_destinatario_dado_de_baja(client, keys):
+    h = headers(keys["inventario"])
+    d = client.post(
+        "/notificaciones/destinatarios",
+        json={"nombre": "Ana", "email": "ana@x.com", "tipos": ["STOCK_BAJO_INSUMO"]},
+        headers=h,
+    ).json()
+    client.delete(f"/notificaciones/destinatarios/{d['id']}", headers=h)
+    r = client.put(
+        f"/notificaciones/destinatarios/{d['id']}",
+        json={"nombre": "Ana", "email": "ana@x.com", "tipos": []},
+        headers=h,
+    )
+    assert r.status_code == 404
+
+
+def test_admin_no_marca_leida(client, keys, datos):
+    id_ = client.get("/notificaciones/estado", headers=headers(keys["notificaciones"])).json()["items"][0]["id"]
+    assert (
+        client.patch(f"/notificaciones/estado/{id_}/leida", headers=headers(keys["notificaciones"])).status_code == 403
+    )
+
+
+def test_callback_puerto_raro_rechazado(client, keys):
+    r = client.put(
+        "/notificaciones/callbacks", json={"url": "https://8.8.8.8:6379/x"}, headers=headers(keys["inventario"])
+    )
+    assert r.status_code == 422

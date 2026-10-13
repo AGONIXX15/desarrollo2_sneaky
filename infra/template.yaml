@@ -21,12 +21,25 @@ Parameters:
   MailFrom:
     Type: String
     Default: notificaciones@example.com
+  AlertaEmail:
+    Type: String
+    Description: Correo que recibe el aviso cuando falla el ciclo
 
 Resources:
   ColaMuertos:
     Type: AWS::SQS::Queue
     Properties:
       MessageRetentionPeriod: 1209600
+
+  TemaAlarma:
+    Type: AWS::SNS::Topic
+
+  SuscripcionAlarma:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref TemaAlarma
+      Protocol: email
+      Endpoint: !Ref AlertaEmail
 
   FuncionCiclo:
     Type: AWS::Serverless::Function
@@ -35,8 +48,10 @@ Resources:
       Handler: lambda_retry.handler.handler
       Runtime: python3.12
       Architectures: [x86_64]
-      Timeout: 120
+      Timeout: 300
       MemorySize: 256
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt ColaMuertos.Arn
@@ -68,6 +83,8 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: El ciclo de notificaciones fallo
+      AlarmActions:
+        - !Ref TemaAlarma
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:

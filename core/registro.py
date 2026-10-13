@@ -66,7 +66,12 @@ def registrar(session: Session, equipo: Equipo, cuerpo: dict) -> Resultado:
     if errores:
         raise ErrorRegistro(422, errores)
 
-    clave = clave_de(tipo, datos)
+    try:
+        clave = clave_de(tipo, datos)
+    except KeyError:
+        raise ErrorRegistro(422, f"Falta el campo clave {tipo.campo_clave}") from None
+    if not clave or len(clave) > 100:
+        raise ErrorRegistro(422, "La clave de la alerta debe tener entre 1 y 100 caracteres")
     cerrar_vencidas(session, tipo.codigo, clave)
 
     activa = alerta_activa(session, tipo.codigo, clave)
@@ -134,14 +139,16 @@ def registrar(session: Session, equipo: Equipo, cuerpo: dict) -> Resultado:
     return Resultado(201, notif.id)
 
 
-def procesar_despues_de_registrar(
-    session_factory, publisher: Publisher, mailer: Mailer, notificacion_id: UUID
-) -> None:
+def procesar_despues_de_registrar(session_factory, publisher: Publisher, mailer: Mailer, notificacion_id: UUID) -> None:
     """Tarea de fondo: publica en la cola y manda los correos. Nada de esto debe tumbar la API."""
     try:
         with session_factory() as session:
-            notif = session.get(Notificacion, notificacion_id)
-            publicar_notificacion(session, publisher, notif)
+            notif = session.scalar(
+                select(Notificacion).where(Notificacion.id == notificacion_id).with_for_update(skip_locked=True)
+            )
+            # si es None otro proceso (el ciclo) ya la tiene tomada
+            if notif is not None and notif.publicada_at is None:
+                publicar_notificacion(session, publisher, notif)
             session.commit()
     except Exception:
         log.exception("error publicando notificacion %s", notificacion_id)
@@ -149,10 +156,12 @@ def procesar_despues_de_registrar(
     try:
         with session_factory() as session:
             envios = session.scalars(
-                select(EnvioCorreo).where(
+                select(EnvioCorreo)
+                .where(
                     EnvioCorreo.notificacion_id == notificacion_id,
                     EnvioCorreo.enviado_at.is_(None),
                 )
+                .with_for_update(skip_locked=True)
             ).all()
             if not envios:
                 log.info("notificacion %s sin destinatarios, no se envían correos", notificacion_id)

@@ -39,12 +39,8 @@ def _filtro_estado(estado: str):
         "publicacion_fallida": and_(
             N.entregada_at.is_(None), N.publicada_at.is_(None), N.intentos_publicacion >= maximo
         ),
-        "entrega_fallida": and_(
-            N.entregada_at.is_(None), N.publicada_at.is_not(None), N.intentos_entrega >= maximo
-        ),
-        "publicada": and_(
-            N.entregada_at.is_(None), N.publicada_at.is_not(None), N.intentos_entrega < maximo
-        ),
+        "entrega_fallida": and_(N.entregada_at.is_(None), N.publicada_at.is_not(None), N.intentos_entrega >= maximo),
+        "publicada": and_(N.entregada_at.is_(None), N.publicada_at.is_not(None), N.intentos_entrega < maximo),
     }[estado]
 
 
@@ -108,9 +104,7 @@ def listar(
 
 
 @router.get("/{id_}")
-def detalle(
-    id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = Depends(get_session)
-):
+def detalle(id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = Depends(get_session)):
     n = _visible(session, equipo, id_)
     maximo = get_settings().max_intentos
     alerta = session.scalar(select(Alerta).where(Alerta.notificacion_id == n.id))
@@ -119,14 +113,14 @@ def detalle(
         publicacion={
             "publicada_at": n.publicada_at,
             "intentos": n.intentos_publicacion,
-            "ultimo_error": n.ultimo_error_publicacion,
+            "error": "error al publicar" if n.ultimo_error_publicacion else None,
             "fallida": n.publicada_at is None and n.intentos_publicacion >= maximo,
         },
         entrega={
             "entregada_at": n.entregada_at,
             "intentos": n.intentos_entrega,
             "proximo_intento_at": n.proximo_intento_entrega_at,
-            "ultimo_error": n.ultimo_error_entrega,
+            "error": "error de entrega" if n.ultimo_error_entrega else None,
             "fallida": n.entregada_at is None and n.intentos_entrega >= maximo,
             "con_callback": callback_de(session, n.equipo_destino_id) is not None,
         },
@@ -136,7 +130,7 @@ def detalle(
                 "enviado_at": e.enviado_at,
                 "intentos": e.intentos,
                 "proximo_intento_at": e.proximo_intento_at,
-                "ultimo_error": e.ultimo_error,
+                "error": "error al enviar el correo" if e.ultimo_error else None,
                 "fallido": e.enviado_at is None and e.intentos >= maximo,
             }
             for e in n.envios
@@ -166,10 +160,10 @@ def _fechas_iso(obj):
 
 
 @router.patch("/{id_}/leida", response_model=NotificacionResumen)
-def marcar_leida(
-    id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = Depends(get_session)
-):
+def marcar_leida(id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = Depends(get_session)):
     n = _visible(session, equipo, id_)
+    if n.equipo_destino_id != equipo.id:
+        raise HTTPException(403, "Solo el equipo destino puede marcarla como leída")
     if n.leida_at is None:
         n.leida_at = ahora()
         session.commit()

@@ -57,7 +57,11 @@ class FakeMailer:
 def db_url(postgres_proc):
     p = postgres_proc
     janitor = DatabaseJanitor(
-        user=p.user, host=p.host, port=p.port, dbname="notif_test", version=p.version,
+        user=p.user,
+        host=p.host,
+        port=p.port,
+        dbname="notif_test",
+        version=p.version,
         password=p.password,
     )
     janitor.init()
@@ -151,3 +155,14 @@ def headers(key):
 @pytest.fixture
 def equipo_id(session):
     return {e.nombre: e.id for e in session.scalars(select(Equipo))}
+
+
+@pytest.fixture
+def envejecer(session):
+    """Retrasa creada_at para que el ciclo no las confunda con recién creadas."""
+
+    def _envejecer():
+        session.execute(text("UPDATE notificaciones SET creada_at = creada_at - interval '10 minutes'"))
+        session.commit()
+
+    return _envejecer

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, PlainSerializer, field_validator
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer
 
 
 def _a_utc(d: datetime) -> str:
@@ -15,16 +15,9 @@ FechaUTC = Annotated[datetime, PlainSerializer(_a_utc, return_type=str)]
 
 
 class DestinatarioIn(BaseModel):
-    nombre: str
-    email: str
-    tipos: list[str]
-
-    @field_validator("email")
-    @classmethod
-    def email_basico(cls, v: str) -> str:
-        if "@" not in v or v.startswith("@") or v.endswith("@"):
-            raise ValueError("email inválido")
-        return v.strip()
+    nombre: str = Field(min_length=1, max_length=120)
+    email: EmailStr = Field(max_length=254)
+    tipos: list[str] = Field(max_length=50)
 
 
 class DestinatarioOut(BaseModel):

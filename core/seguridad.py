@@ -25,8 +25,9 @@ def generar_secreto() -> str:
     return secrets.token_hex(32)
 
 
-def firmar(cuerpo: bytes, secreto: str) -> str:
-    return hmac.new(secreto.encode(), cuerpo, hashlib.sha256).hexdigest()
+def firmar(cuerpo: bytes, secreto: str, timestamp: str) -> str:
+    # la firma cubre el timestamp para que el receptor pueda rechazar mensajes viejos repetidos
+    return hmac.new(secreto.encode(), timestamp.encode() + b"." + cuerpo, hashlib.sha256).hexdigest()
 
 
 class UrlInvalida(ValueError):
@@ -41,6 +42,8 @@ def validar_url_callback(url: str) -> None:
     host = partes.hostname
     if not host:
         raise UrlInvalida("La URL no tiene host")
+    if partes.port not in (None, 443, 8443):
+        raise UrlInvalida("Solo se permiten los puertos 443 y 8443")
     if host.lower() == "localhost":
         raise UrlInvalida("No se permite localhost")
     try:
