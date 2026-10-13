@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: notificaciones
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: AMQP_URL
+        sync: false
+      - key: MAIL_BACKEND
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: WORKER_ENABLED
+        value: "true"

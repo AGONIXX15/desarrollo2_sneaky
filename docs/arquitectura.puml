@@ -1,0 +1,45 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam sequenceMessageAlign left
+
+title Registro, entrega y reintentos de una notificación
+
+actor "Equipo emisor" as E
+participant "API\n(FastAPI + worker)" as API
+database "BD\n(Neon)" as BD
+queue "CloudAMQP" as MQ
+participant "Brevo" as B
+participant "Equipo destino\n(webhook)" as D
+participant "EventBridge" as EB
+participant "Lambda" as L
+
+== Registro ==
+E -> API : POST /notificaciones (X-API-Key)
+API -> BD : valida, busca alerta activa
+alt alerta activa
+  API --> E : 200 con id existente
+else nueva
+  API -> BD : notificación + alerta + envíos (una transacción)
+  API --> E : 201
+  API -> MQ : publica (exchange notificaciones, key = equipo destino)
+  API -> BD : publicada_at
+  API -> B : correo a cada destinatario
+  API -> BD : enviado_at / intentos
+end
+
+== Webhook ==
+MQ -> API : mensaje (worker)
+API -> BD : lee notificación y callback
+API -> D : POST firmado (X-Signature)
+API -> BD : entregada_at o intentos_entrega
+
+== Reintentos cada 5 min ==
+EB -> L : rate(5 minutes)
+L -> BD : FOR UPDATE SKIP LOCKED
+L -> MQ : republica pendientes
+L -> B : reenvía correos
+L -> D : re-POST webhook
+L -> BD : cierra alertas vencidas
+L -> API : GET /health (que Render no se duerma)
+@enduml
