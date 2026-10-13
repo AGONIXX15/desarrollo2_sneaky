@@ -8,3 +8,4 @@ docs-privados/
 .ruff_cache/
 *.egg-info/
 infra/build/
+graphify-out/
