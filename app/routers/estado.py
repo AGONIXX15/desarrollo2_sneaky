@@ -141,6 +141,7 @@ def detalle(id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = 
             "clave": alerta.clave,
             "expira_at": alerta.expira_at,
             "cerrada_at": alerta.cerrada_at,
+            "motivo_resolucion": alerta.motivo_resolucion,
             "activa": alerta.cerrada_at is None and alerta.expira_at > ahora(),
         },
     )
