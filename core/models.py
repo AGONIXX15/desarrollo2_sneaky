@@ -85,6 +85,7 @@ class Callback(Base):
     equipo_id: Mapped[int] = mapped_column(ForeignKey("equipos.id"), unique=True)
     url: Mapped[str] = mapped_column(Text)
     secreto: Mapped[str] = mapped_column(String(128))
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
     actualizado_at: Mapped[datetime]
 
 

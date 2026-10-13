@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.config import get_settings
 from core.db import ahora
+from core.mensajes import mensaje_de
 from core.models import Callback, Notificacion
 from core.seguridad import firmar, validar_url_callback
 
@@ -23,6 +24,7 @@ def cuerpo_webhook(notif: Notificacion) -> bytes:
             "equipoEmisor": notif.emisor.nombre,
             "equipoDestino": notif.destino.nombre,
             "creadaAt": notif.creada_at.isoformat(),
+            "mensaje": mensaje_de(notif.tipo, notif.payload),
             "datos": notif.payload,
         },
         sort_keys=True,
@@ -68,8 +70,8 @@ def procesar_mensaje(session_factory, http_client: httpx.Client, datos: dict) ->
         if notif is None or notif.entregada_at is not None:
             return
         callback = callback_de(session, notif.equipo_destino_id)
-        if callback is None:
-            log.info("sin callback para %s, el equipo consulta por GET", notif.destino.nombre)
+        if callback is None or not callback.activo:
+            log.info("sin callback activo para %s, el equipo consulta por GET", notif.destino.nombre)
             return
         entregar_webhook(session, notif, callback, http_client)
         session.commit()

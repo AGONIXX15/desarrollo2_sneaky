@@ -98,3 +98,13 @@ El `Dockerfile` corre `alembic upgrade head` antes de levantar uvicorn. Funciona
 ## Carrera entre la API y el ciclo
 
 El ciclo ignora las notificaciones creadas hace menos de un minuto para no pisar la tarea de fondo que acaba de crearlas. La tarea de fondo toma la fila con `SKIP LOCKED` y revisa `publicada_at` antes de publicar.
+
+## Ajustes para alinear con el backlog v3
+
+- Los destinatarios se actualizan con `PATCH` (nombre, tipos o activo, también para dar de baja y reactivar), ya no con `PUT` y `DELETE`. Registrar un correo que ya está activo en el mismo equipo responde 409 con el id existente. El listado se pagina (`pagina`, `tamano`, `totalPaginas`, `total`) y filtra por `activo`.
+- El callback tiene `activo` (migración `0003`). Un callback desactivado se trata igual que uno sin registrar: el worker no entrega, el ciclo lo ignora y las notificaciones quedan consultables por GET.
+- El secreto del callback ya no cambia en cada `PUT`: solo al crearlo o con `regenerarSecreto`.
+- El admin puede marcar notificaciones como leídas.
+- El `mensaje` de una notificación se calcula con `core/mensajes.py` y no se guarda. Se devuelve en las consultas y en el cuerpo del webhook.
+- Los esquemas de cada tipo tienen límites de longitud y rango (migración `0003`). Para cambiar un límite basta otra migración que actualice la fila de `tipos_notificacion`.
+- Los listados de notificaciones también devuelven `totalPaginas`.

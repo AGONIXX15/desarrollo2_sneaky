@@ -233,7 +233,7 @@ La Lambda no recibe los secretos directamente. Recibe el nombre del parámetro (
 
 ## Webhooks
 
-Cada equipo registra su URL con `PUT /notificaciones/callbacks`, y la respuesta trae el secreto para verificar la firma. La URL tiene que ser `https` en el puerto 443 o 8443 y no puede apuntar a una IP privada. Se vuelve a validar antes de cada envío.
+Cada equipo registra su URL con `PUT /notificaciones/callbacks`. La primera vez responde 201 con el secreto para verificar la firma. Al cambiar la URL el secreto se conserva (200 sin secreto), y solo cambia con `"regenerarSecreto": true`. `GET /notificaciones/callbacks` devuelve la URL y si está activa, nunca el secreto, y `PATCH /notificaciones/callbacks` con `{"activo": false}` deja de entregar sin borrarlo (las notificaciones quedan consultables por GET y se entregan al reactivarlo). La URL tiene que ser `https` en el puerto 443 o 8443 y no puede apuntar a una IP privada. Se vuelve a validar antes de cada envío.
 
 Cada POST trae `X-Notification-Id`, `X-Timestamp` y `X-Signature`. La firma es el HMAC-SHA256 en hex de `timestamp + "." + body`:
 

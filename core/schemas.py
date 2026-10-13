@@ -17,7 +17,13 @@ FechaUTC = Annotated[datetime, PlainSerializer(_a_utc, return_type=str)]
 class DestinatarioIn(BaseModel):
     nombre: str = Field(min_length=1, max_length=120)
     email: EmailStr = Field(max_length=254)
-    tipos: list[str] = Field(max_length=50)
+    tipos: list[str] = Field(min_length=1, max_length=50)
+
+
+class DestinatarioPatch(BaseModel):
+    nombre: str | None = Field(default=None, min_length=1, max_length=120)
+    tipos: list[str] | None = Field(default=None, min_length=1, max_length=50)
+    activo: bool | None = None
 
 
 class DestinatarioOut(BaseModel):
@@ -30,12 +36,25 @@ class DestinatarioOut(BaseModel):
 
 
 class CallbackIn(BaseModel):
-    url: str
+    url: str = Field(max_length=2048)
+    regenerarSecreto: bool = False
 
 
 class CallbackOut(BaseModel):
     url: str
-    secreto: str
+    activo: bool
+    actualizado_at: FechaUTC
+    secreto: str | None = None
+
+
+class CallbackEstado(BaseModel):
+    url: str
+    activo: bool
+    actualizado_at: FechaUTC
+
+
+class CallbackPatch(BaseModel):
+    activo: bool
 
 
 class RegistroOut(BaseModel):
@@ -50,6 +69,7 @@ class NotificacionResumen(BaseModel):
     emisor: str
     destino: str
     estado: str
+    mensaje: str
     creada_at: FechaUTC
     leida_at: FechaUTC | None
     payload: dict
@@ -60,3 +80,12 @@ class Pagina(BaseModel):
     total: int
     pagina: int
     tamano: int
+    totalPaginas: int
+
+
+class PaginaDestinatarios(BaseModel):
+    items: list[DestinatarioOut]
+    total: int
+    pagina: int
+    tamano: int
+    totalPaginas: int

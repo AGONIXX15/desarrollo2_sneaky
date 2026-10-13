@@ -1,4 +1,5 @@
 from datetime import datetime
+from math import ceil
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_equipo, get_session
 from core.config import get_settings
 from core.db import ahora
+from core.mensajes import mensaje_de
 from core.models import Alerta, Equipo, Notificacion
 from core.schemas import NotificacionResumen, Pagina
 from core.webhooks import callback_de
@@ -51,6 +53,7 @@ def _resumen(n: Notificacion) -> NotificacionResumen:
         emisor=n.emisor.nombre,
         destino=n.destino.nombre,
         estado=estado_de(n),
+        mensaje=mensaje_de(n.tipo, n.payload),
         creada_at=n.creada_at,
         leida_at=n.leida_at,
         payload=n.payload,
@@ -100,7 +103,13 @@ def listar(
         .offset((pagina - 1) * tamano)
         .limit(tamano)
     ).all()
-    return Pagina(items=[_resumen(n) for n in filas], total=total, pagina=pagina, tamano=tamano)
+    return Pagina(
+        items=[_resumen(n) for n in filas],
+        total=total,
+        pagina=pagina,
+        tamano=tamano,
+        totalPaginas=ceil(total / tamano),
+    )
 
 
 @router.get("/{id_}")
@@ -122,7 +131,7 @@ def detalle(id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = 
             "proximo_intento_at": n.proximo_intento_entrega_at,
             "error": "error de entrega" if n.ultimo_error_entrega else None,
             "fallida": n.entregada_at is None and n.intentos_entrega >= maximo,
-            "con_callback": callback_de(session, n.equipo_destino_id) is not None,
+            "con_callback": getattr(callback_de(session, n.equipo_destino_id), "activo", False),
         },
         correos=[
             {
@@ -163,8 +172,6 @@ def _fechas_iso(obj):
 @router.patch("/{id_}/leida", response_model=NotificacionResumen)
 def marcar_leida(id_: UUID, equipo: Equipo = Depends(get_equipo), session: Session = Depends(get_session)):
     n = _visible(session, equipo, id_)
-    if n.equipo_destino_id != equipo.id:
-        raise HTTPException(403, "Solo el equipo destino puede marcarla como leída")
     if n.leida_at is None:
         n.leida_at = ahora()
         session.commit()

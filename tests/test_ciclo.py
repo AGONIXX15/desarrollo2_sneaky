@@ -109,6 +109,7 @@ def test_webhook_firma_hmac(client, keys, factory, http_mock):
     assert req.headers["X-Signature"] == esperado
     assert req.headers["X-Notification-Id"] == str(n.id)
     assert json.loads(req.content)["datos"]["productoId"] == 7
+    assert json.loads(req.content)["mensaje"] == "Stock bajo de Harina (7): 2 unidades, mínimo 10"
 
 
 def test_webhook_fallido_y_reintento_por_ciclo(client, keys, publisher, mailer, factory, http_mock, session):
